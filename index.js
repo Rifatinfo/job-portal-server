@@ -1,12 +1,33 @@
 const express = require('express')
 const cors = require('cors')
+const cookieParser = require('cookie-parser')
+const jwt = require('jsonwebtoken');
+
 const app = express()
 const port = process.env.PORT || 5000
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
-app.use(cors());
+app.use(cors({
+  origin : ["http://localhost:5175/"],
+  credentials : true
+}));
+app.use(cookieParser())
 app.use(express.json())
 require('dotenv').config()
+
+const verifyToken = (req, res, next) =>{
+  const token = req.cookie?.token;
+  if(!token){ 
+     return res.status(401).send({message : "UnAuthories Access"})
+  }
+  jwt.verify(token , process.env.ACCESS_TOKEN_SECRET , (err, decoded) =>{
+    if(err){
+      return res.status(401).send({message : "UnAuthories Access"})
+    }
+    req.user = decoded
+    next();
+  })
+}
 
 //  job-poral    
 //  a8xTSjJwPLpEQ29f
@@ -58,11 +79,13 @@ async function run() {
       res.send(result);
     })
 
-    app.get('/job-applications', async (req, res) => {
+    app.get('/job-applications', verifyToken , async (req, res) => {
       const email = req.query.email;
       const query = {email : email}
       const result = await jobsApplicationCollection.find(query).toArray();
-
+      if(req.user.email !== req.query.email){
+        return res.status(403).send({message : 'forbidden access'})
+      }
       for(const application of result){
         console.log(application.job_id); 
         const query1 = {_id : new ObjectId(application.job_id)}
@@ -87,12 +110,32 @@ async function run() {
       const result = await jobsApplicationCollection.find(query).toArray();
       res.send(result)
     })
+
+    app.post('/jwt', (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn : '5h'
+      });
+      res.cookie('token', token , {
+        httpOnly : true,
+        secure : false
+      })
+      .send({success : true})
+    })
+
+    app.post('/logout', (req, res) => {
+      res.clearCookie('token', {
+        httpOnly : true,
+        secure : false
+      })
+      .send({success : true})
+    })
     
     app.post('/job-applications', async (req, res) => {
       const application = req.body;
       const result = await jobsApplicationCollection.insertOne(application);
 
-
+     
       const id = application.job_id;
       const query = {_id : new ObjectId(id)}
       const job = await jobsCollection.findOne(query)
